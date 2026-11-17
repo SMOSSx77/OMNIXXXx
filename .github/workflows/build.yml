@@ -1,70 +1,80 @@
 
-name: OMNIX APK Derlemesi
+name: OMNIX APK Build
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+      - master
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Kaynak kodunu indir
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Java 17 kur
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK kur
-        shell: bash
+      - name: Extract Android project
         run: |
-          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          mkdir -p source
+          unzip -q OMNIX_GitHub_Hazir.zip -d source
+          echo "Project files:"
+          ls -la source
+          test -f source/settings.gradle
+          test -f source/app/build.gradle
 
-          mkdir -p "$ANDROID_HOME/cmdline-tools"
+      - name: Setup Android SDK
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+          echo "SDK ROOT: $SDK_ROOT"
+
+          mkdir -p "$SDK_ROOT/cmdline-tools"
+          cd /tmp
 
           curl -fL \
-            https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip \
-            -o /tmp/android-tools.zip
+            https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+            -o android-tools.zip
 
-          unzip -q /tmp/android-tools.zip -d "$ANDROID_HOME/cmdline-tools"
-          mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          mkdir -p android-tools
+          unzip -q android-tools.zip -d android-tools
 
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          rm -rf "$SDK_ROOT/cmdline-tools/latest"
+          mkdir -p "$SDK_ROOT/cmdline-tools/latest"
+          cp -r android-tools/cmdline-tools/. "$SDK_ROOT/cmdline-tools/latest/"
 
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses || true
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            --sdk_root="$ANDROID_HOME" \
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$SDK_ROOT" --licenses || true
+
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$SDK_ROOT" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Gradle 8.9 kur
+      - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: OMNIX ZIP dosyasını aç
+      - name: Build OMNIX APK
         run: |
-          unzip -q OMNIX_GitHub_Hazir.zip -d source
-          ls -la source/OMNIX
+          gradle --no-daemon --stacktrace \
+            -p source assembleDebug
 
-      - name: APK oluştur
-        run: |
-          cd source/OMNIX
-          gradle --no-daemon assembleDebug
-
-      - name: APK dosyasını yükle
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: OMNIX-APK
-          path: source/OMNIX/app/build/outputs/apk/debug/app-debug.apk
+          path: source/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
